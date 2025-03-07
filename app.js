@@ -14,7 +14,14 @@ let resultsList;
 let session = null;
 let isModelLoaded = false;
 let lastResults = []; // שמירת התוצאות האחרונות
-const modelPath = './yolov8n-seg.onnx'; // נתיב יחסי למודל המובנה
+
+// נתיבים אפשריים למודל - ננסה לפי הסדר
+const modelPaths = [
+    './yolov8n-seg.onnx', // נתיב יחסי מקומי
+    '/yolov8n-seg.onnx', // נתיב שורש
+    'https://github.com/Theicd/YOLOWEBTEST/raw/main/yolov8n-seg.onnx', // נתיב גיטהאב ישיר
+    'https://raw.githubusercontent.com/Theicd/YOLOWEBTEST/main/yolov8n-seg.onnx' // נתיב raw.githubusercontent.com
+];
 
 // קבועים למודל
 const IMAGE_SIZE = 640;
@@ -138,21 +145,39 @@ function setupEventListeners() {
 // טעינת המודל המובנה
 function loadBuiltInModel() {
     // עדכון סטטוס הטעינה
-    updateModelStatus('loading', 'טוען מודל...');
+    updateModelStatus('loading', 'טוען מודל... (זה עשוי לקחת מספר שניות)');
     
-    // טעינת המודל
-    loadModel(modelPath);
+    // טעינת המודל - ננסה לפי הסדר
+    tryLoadModelFromPaths(0);
+}
+
+// ניסיון טעינת מודל מכל הנתיבים האפשריים
+async function tryLoadModelFromPaths(index) {
+    if (index >= modelPaths.length) {
+        // נכשלנו לטעון מכל הנתיבים
+        updateModelStatus('error', 'נכשל בטעינת המודל מכל המקורות האפשריים');
+        console.error('נכשל לטעון את המודל מכל הנתיבים האפשריים');
+        return;
+    }
+    
+    const currentPath = modelPaths[index];
+    console.log(`מנסה לטעון מודל מנתיב (${index + 1}/${modelPaths.length}): ${currentPath}`);
+    
+    try {
+        await loadModel(currentPath);
+        // אם הגענו לכאן, המודל נטען בהצלחה
+    } catch (error) {
+        console.warn(`שגיאה בטעינת המודל מנתיב ${currentPath}:`, error);
+        console.log(`מנסה נתיב הבא (${index + 1} מתוך ${modelPaths.length})`);
+        // ניסיון הנתיב הבא
+        tryLoadModelFromPaths(index + 1);
+    }
 }
 
 // טעינת המודל
 async function loadModel(modelPath) {
     try {
-        // עדכון הסטטוס
-        modelStatusElement.classList.add('loading');
-        modelStatusElement.classList.remove('success', 'error');
-        modelStatusElement.textContent = 'סטטוס מודל: טוען...';
-        
-        console.log('מתחיל לטעון את המודל המובנה:', modelPath);
+        console.log('התחלת טעינת המודל:', modelPath);
         
         // הגדרת אפשרויות לטעינת המודל
         const options = {
@@ -160,8 +185,38 @@ async function loadModel(modelPath) {
             graphOptimizationLevel: 'all'
         };
         
-        // טעינת המודל
-        session = await ort.InferenceSession.create(modelPath, options);
+        // ניסיון לטעון את המודל
+        if (modelPath.startsWith('http')) {
+            // טעינה מ-URL מרוחק
+            console.log('מנסה לטעון מודל מ-URL מרוחק:', modelPath);
+            
+            try {
+                // ניסיון ראשון - טעינה ישירה (עשוי להיכשל בגלל CORS)
+                session = await ort.InferenceSession.create(modelPath, options);
+            } catch (corsError) {
+                console.warn('שגיאת CORS בטעינה ישירה, מנסה דרך fetch:', corsError.message);
+                
+                // ניסיון שני - שימוש ב-fetch
+                updateModelStatus('loading', 'מוריד את המודל... (יכול לקחת מספר שניות)');
+                
+                const response = await fetch(modelPath);
+                
+                if (!response.ok) {
+                    throw new Error(`שגיאה בהורדת המודל: ${response.status} ${response.statusText}`);
+                }
+                
+                updateModelStatus('loading', 'מעבד את המודל...');
+                const modelData = await response.arrayBuffer();
+                
+                // טעינת המודל מה-ArrayBuffer
+                session = await ort.InferenceSession.create(new Uint8Array(modelData), options);
+            }
+        } else {
+            // טעינה מקומית
+            console.log('מנסה לטעון מודל מקומי:', modelPath);
+            session = await ort.InferenceSession.create(modelPath, options);
+        }
+        
         console.log("המודל נטען בהצלחה:", session);
         
         // בדיקת מבנה קלט/פלט של המודל
@@ -172,30 +227,46 @@ async function loadModel(modelPath) {
         
         // עדכון הסטטוס
         isModelLoaded = true;
-        modelStatusElement.textContent = `סטטוס מודל: נטען`;
-        modelStatusElement.classList.remove('loading');
-        modelStatusElement.classList.add('success');
+        updateModelStatus('loaded', 'המודל נטען בהצלחה!');
         console.log('המודל נטען בהצלחה');
+        
+        return true; // חשוב להחזיר הצלחה עבור פונקציית tryLoadModelFromPaths
         
     } catch (error) {
         console.error('שגיאה בטעינת המודל:', error);
-        modelStatusElement.textContent = `סטטוס מודל: שגיאה`;
-        modelStatusElement.classList.remove('loading');
-        modelStatusElement.classList.add('error');
+        // לא מעדכנים את הסטטוס כאן כדי לאפשר ניסיון נתיבים נוספים
         console.error('פרטי השגיאה:', error.message);
         
         // איפוס משתנים
         isModelLoaded = false;
         session = null;
+        
+        // מעבירים את השגיאה כדי שפונקציית tryLoadModelFromPaths תנסה את הנתיב הבא
+        throw error;
     }
 }
 
 // עדכון סטטוס טעינת המודל
 function updateModelStatus(status, message) {
-    const statusLoader = modelStatusElement.querySelector('.loader');
-    const statusText = modelStatusElement.querySelector('p');
+    if (!modelStatusElement) {
+        console.error('אלמנט סטטוס המודל לא נמצא!');
+        return;
+    }
     
-    if (!modelStatusElement) return;
+    // אם האלמנטים הפנימיים לא קיימים עדיין, נייצר אותם
+    let statusLoader = modelStatusElement.querySelector('.loader');
+    let statusText = modelStatusElement.querySelector('p');
+    
+    if (!statusLoader) {
+        statusLoader = document.createElement('div');
+        statusLoader.className = 'loader';
+        modelStatusElement.appendChild(statusLoader);
+    }
+    
+    if (!statusText) {
+        statusText = document.createElement('p');
+        modelStatusElement.appendChild(statusText);
+    }
     
     // מציג את האינדיקטור
     modelStatusElement.style.display = 'flex';
@@ -232,6 +303,16 @@ function updateModelStatus(status, message) {
 
 // הצגת הודעת שגיאה
 function showError(message) {
+    // בדיקה שזאת תמונה
+    if (!file.type.startsWith('image/')) {
+        throw new Error('אנא העלה קובץ תמונה בלבד');
+    }
+    
+    // בדיקה שהמודל נטען
+    if (!isModelLoaded) {
+        throw new Error('אנא טען מודל לפני העלאת תמונה');
+    }
+        
     // בדיקה אם יש כבר אלמנט שגיאה
     let errorElement = document.getElementById('error-message');
     
