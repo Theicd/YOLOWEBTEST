@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>מערכת זיהוי אובייקטים - YOLOv8</title>
+    <base href="./">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@100;200;300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="glass-container">
+        <div class="header">
+            <div class="logo-container">
+                <div class="logo-text">YOLOv8</div>
+            </div>
+            <h1>מנתח תמונות AI</h1>
+            <p class="subtitle">גרור או בחר תמונה לניתוח מיידי עם בינה מלאכותית</p>
+        </div>
+
+        <div class="model-status-container">
+            <div id="modelStatus" class="model-status">
+                <div class="loader"></div>
+                <p>סטטוס מודל: טוען...</p>
+            </div>
+        </div>
+
+        <div id="drop-zone" class="drop-zone">
+            <h3>העלה תמונה לניתוח</h3>
+            <div class="icon-container">
+                <div class="upload-icon"></div>
+            </div>
+            <div class="drop-text">גרור תמונה לכאן או לחץ לבחירה</div>
+            <input type="file" id="upload-input" accept="image/*" class="file-input">
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="loader"></div>
+            <div id="loading-text">טוען...</div>
+        </div>
+
+        <div id="preview-container">
+            <div id="preview"></div>
+            <div id="results-panel">
+                <h2>תוצאות הניתוח</h2>
+                <div id="results-list"></div>
+                <div class="button-group">
+                    <button id="clearBtn" class="browse-btn">נקה תוצאות</button>
+                    <button id="exportBtn" class="browse-btn">ייצא תוצאות</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>פותח למטרות לימודיות בלבד | YOLOv8 Segmentation</p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/ort.min.js"></script>
+    <script src="./app.js"></script>
+</body>
+</html>
