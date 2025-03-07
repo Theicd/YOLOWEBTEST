@@ -25,7 +25,7 @@ const modelPaths = [
 
 // קבועים למודל
 const IMAGE_SIZE = 640;
-const CONFIDENCE_THRESHOLD = 0.25;
+const CONFIDENCE_THRESHOLD = 0.5; // העלאת סף הביטחון - היה 0.25 קודם
 const NUM_CLASSES = 80;
 const ANCHORS = [];
 
@@ -47,15 +47,26 @@ const COCO_CLASSES = [
 const COCO_CLASSES_HEBREW = [
     'אדם', 'אופניים', 'מכונית', 'אופנוע', 'מטוס', 'אוטובוס', 'רכבת', 'משאית', 'סירה',
     'רמזור', 'ברז כיבוי', 'תמרור עצור', 'מד חניה', 'ספסל', 'ציפור', 'חתול', 'כלב',
-    'סוס', 'כבשה', 'פרה', 'פיל', 'דוב', 'זברה', 'ג\'ירפה', 'תיק גב', 'מטרייה',
+    'סוס', 'כבשה', 'פרה', 'פיל', 'דוב', 'זברה', 'ג׳ירפה', 'תיק גב', 'מטריה',
     'תיק יד', 'עניבה', 'מזוודה', 'פריסבי', 'מגלשיים', 'סנובורד', 'כדור ספורט', 'עפיפון',
     'מחבט בייסבול', 'כפפת בייסבול', 'סקייטבורד', 'גלשן', 'מחבט טניס', 'בקבוק',
     'כוס יין', 'כוס', 'מזלג', 'סכין', 'כף', 'קערה', 'בננה', 'תפוח', 'כריך',
-    'תפוז', 'ברוקולי', 'גזר', 'נקניקייה', 'פיצה', 'דונאט', 'עוגה', 'כיסא', 'ספה',
-    'צמח בעציץ', 'מיטה', 'שולחן אוכל', 'אסלה', 'טלוויזיה', 'מחשב נייד', 'עכבר', 'שלט',
+    'תפוז', 'ברוקולי', 'גזר', 'נקניקיה', 'פיצה', 'דונאט', 'עוגה', 'כיסא', 'ספה',
+    'עציץ', 'מיטה', 'שולחן אוכל', 'שירותים', 'טלוויזיה', 'לפטופ', 'עכבר', 'שלט',
     'מקלדת', 'טלפון נייד', 'מיקרוגל', 'תנור', 'טוסטר', 'כיור', 'מקרר', 'ספר',
     'שעון', 'אגרטל', 'מספריים', 'דובי', 'מייבש שיער', 'מברשת שיניים'
 ];
+
+// רשימת מחלקות מועדפות לתצוגה (מסודרות לפי סדר עדיפות)
+const PREFERRED_CLASSES = [
+    'banana', 'apple', 'orange', 'broccoli', 'carrot', // פירות וירקות
+    'person', 'dog', 'cat', // בעלי חיים ואנשים
+    'chair', 'couch', 'table', // רהיטים
+    'car', 'truck', 'bicycle' // כלי רכב
+];
+
+// מיפוי אינדקסים של המחלקות המועדפות
+const PREFERRED_CLASS_INDICES = PREFERRED_CLASSES.map(className => COCO_CLASSES.indexOf(className));
 
 // אתחול האפליקציה
 document.addEventListener('DOMContentLoaded', function() {
@@ -503,18 +514,41 @@ function decodeYoloV8Output(outputMap, imgDimensions) {
                 const cy = boxData[offset + 1];
                 const width = boxData[offset + 2];
                 const height = boxData[offset + 3];
-                boxes.push({
-                    xmin: (cx - width / 2) * imgDimensions[0],
-                    ymin: (cy - height / 2) * imgDimensions[1],
-                    xmax: (cx + width / 2) * imgDimensions[0],
-                    ymax: (cy + height / 2) * imgDimensions[1],
-                    class: maxClassIndex,
-                    score: finalScore
-                });
+                
+                // סינון אובייקטים קטנים מדי (פחות מ-1% משטח התמונה)
+                const boxArea = width * height;
+                const MIN_AREA_RATIO = 0.01;
+                
+                if (boxArea > MIN_AREA_RATIO) {
+                    boxes.push({
+                        xmin: (cx - width / 2) * imgDimensions[0],
+                        ymin: (cy - height / 2) * imgDimensions[1],
+                        xmax: (cx + width / 2) * imgDimensions[0],
+                        ymax: (cy + height / 2) * imgDimensions[1],
+                        class: maxClassIndex,
+                        className: COCO_CLASSES[maxClassIndex],
+                        classNameHebrew: COCO_CLASSES_HEBREW[maxClassIndex],
+                        score: finalScore,
+                        // בדיקה אם המחלקה היא מהמועדפות
+                        isPreferred: PREFERRED_CLASS_INDICES.includes(maxClassIndex)
+                    });
+                }
             }
         }
     }
-    return boxes;
+    
+    // מיון התוצאות:
+    // 1. מחלקות מועדפות לפני מחלקות אחרות
+    // 2. לפי רמת הביטחון (מהגבוה לנמוך)
+    boxes.sort((a, b) => {
+        if (a.isPreferred && !b.isPreferred) return -1;
+        if (!a.isPreferred && b.isPreferred) return 1;
+        return b.score - a.score;
+    });
+    
+    // מגביל את מספר האובייקטים המוצגים
+    const MAX_OBJECTS = 10;
+    return boxes.slice(0, MAX_OBJECTS);
 }
 
 // עיבוד התמונה למודל YOLO
@@ -617,8 +651,7 @@ function clearResults() {
 
 // הצגת תוצאות הזיהוי
 function displayResults(boxes, dimensions) {
-    // מיון התוצאות לפי אחוז ביטחון (מהגבוה לנמוך)
-    boxes.sort((a, b) => b.score - a.score);
+    // התוצאות כבר ממוינות בשלב הפענוח
     
     // שמירת התוצאות
     lastResults = boxes;
@@ -670,10 +703,10 @@ function displayBoxes(ctx, boxes, dimensions) {
         const box = boxes[i];
         
         // חישוב מיקום בפיקסלים
-        const x = box.xmin * dimensions[0];
-        const y = box.ymin * dimensions[1];
-        const width = (box.xmax - box.xmin) * dimensions[0];
-        const height = (box.ymax - box.ymin) * dimensions[1];
+        const x = box.xmin;
+        const y = box.ymin;
+        const width = box.xmax - box.xmin;
+        const height = box.ymax - box.ymin;
         
         // בחירת צבע לפי המחלקה
         const color = colors[box.class % colors.length];
@@ -689,11 +722,8 @@ function displayBoxes(ctx, boxes, dimensions) {
         ctx.fillStyle = color;
         ctx.font = '18px Arial';
         
-        // קבלת שם המחלקה
-        let className = 'Unknown';
-        if (box.class >= 0 && box.class < COCO_CLASSES.length) {
-            className = COCO_CLASSES_HEBREW[box.class] || COCO_CLASSES[box.class];
-        }
+        // קבלת שם המחלקה בעברית
+        const className = box.classNameHebrew || 'לא ידוע';
         
         // הכנת הטקסט לתווית - שם המחלקה ואחוז ביטחון
         const label = `${className}: ${Math.round(box.score * 100)}%`;
@@ -720,11 +750,8 @@ function addResultItem(box, index) {
     const colors = ['#FF3838', '#FF9D97', '#FF701F', '#FFB21D', '#CFD231', '#48F90A', '#92CC17', '#3DDB86', '#1A9334', '#00D4BB', '#2C99A8', '#00C2FF', '#344593', '#6473FF', '#0018EC', '#8438FF', '#520085', '#CB38FF', '#FF95C8', '#FF37C7'];
     const color = colors[box.class % colors.length];
     
-    // קבלת שם המחלקה
-    let className = 'Unknown';
-    if (box.class >= 0 && box.class < COCO_CLASSES.length) {
-        className = COCO_CLASSES_HEBREW[box.class] || COCO_CLASSES[box.class];
-    }
+    // קבלת שם המחלקה בעברית
+    const className = box.classNameHebrew || 'לא ידוע';
     
     // יצירת HTML לפריט
     listItem.innerHTML = `
@@ -776,7 +803,7 @@ function exportResults() {
     
     // הכנת נתונים לייצוא
     const exportData = lastResults.map(result => ({
-        class: result.label,
+        class: result.className,
         confidence: Math.round(result.score * 100) / 100,
         bbox: {
             x_min: Math.round(result.xmin),
