@@ -15,17 +15,17 @@ let session = null;
 let isModelLoaded = false;
 let lastResults = []; // שמירת התוצאות האחרונות
 
-// נתיבים אפשריים למודל - ננסה לפי הסדר
-const modelPaths = [
-    './yolov8n-seg.onnx', // נתיב יחסי מקומי
-    '/yolov8n-seg.onnx', // נתיב שורש
-    'https://github.com/Theicd/YOLOWEBTEST/raw/main/yolov8n-seg.onnx', // נתיב גיטהאב ישיר
-    'https://raw.githubusercontent.com/Theicd/YOLOWEBTEST/main/yolov8n-seg.onnx' // נתיב raw.githubusercontent.com
+// רשימת נתיבים אפשריים למודל
+const MODEL_PATHS = [
+    'models/yolov8n.onnx', // נתיב מקומי
+    'yolov8n.onnx', // נתיב מקומי אלטרנטיבי
+    'https://raw.githubusercontent.com/Theicd/YOLOWEBTEST/main/yolo11n.onnx', // מודל מתקדם מ-GitHub
+    'https://raw.githubusercontent.com/ultralytics/assets/main/yolov8n.onnx' // מודל מקורי מ-GitHub
 ];
 
 // קבועים למודל
 const IMAGE_SIZE = 640;
-const CONFIDENCE_THRESHOLD = 0.5; // העלאת סף הביטחון - היה 0.25 קודם
+const CONFIDENCE_THRESHOLD = 0.6; // העלאת סף הביטחון - היה 0.25 קודם
 const NUM_CLASSES = 80;
 const ANCHORS = [];
 
@@ -67,6 +67,9 @@ const PREFERRED_CLASSES = [
 
 // מיפוי אינדקסים של המחלקות המועדפות
 const PREFERRED_CLASS_INDICES = PREFERRED_CLASSES.map(className => COCO_CLASSES.indexOf(className));
+
+// רשימת אינדקסים של פירות וירקות במודל COCO (מתאים גם למודל YOLOv11)
+const FRUIT_VEG_CLASS_INDICES = [46, 47, 49, 50, 51]; // בננה, תפוח, תפוז, ברוקולי, גזר
 
 // אתחול האפליקציה
 document.addEventListener('DOMContentLoaded', function() {
@@ -153,35 +156,43 @@ function setupEventListeners() {
     });
 }
 
-// טעינת המודל המובנה
-function loadBuiltInModel() {
-    // עדכון סטטוס הטעינה
-    updateModelStatus('loading', 'טוען מודל... (זה עשוי לקחת מספר שניות)');
-    
-    // טעינת המודל - ננסה לפי הסדר
-    tryLoadModelFromPaths(0);
-}
-
-// ניסיון טעינת מודל מכל הנתיבים האפשריים
-async function tryLoadModelFromPaths(index) {
-    if (index >= modelPaths.length) {
-        // נכשלנו לטעון מכל הנתיבים
-        updateModelStatus('error', 'נכשל בטעינת המודל מכל המקורות האפשריים');
-        console.error('נכשל לטעון את המודל מכל הנתיבים האפשריים');
-        return;
-    }
-    
-    const currentPath = modelPaths[index];
-    console.log(`מנסה לטעון מודל מנתיב (${index + 1}/${modelPaths.length}): ${currentPath}`);
-    
+// טעינת מודל מובנה
+async function loadBuiltInModel() {
     try {
-        await loadModel(currentPath);
-        // אם הגענו לכאן, המודל נטען בהצלחה
+        showLoading('טוען מודל מובנה...');
+        updateModelStatus('loading', 'טוען מודל...');
+        
+        let successfulLoad = false;
+        let lastError = null;
+        
+        // ניסיון לטעון את המודל מכל הנתיבים האפשריים עד שאחד מצליח
+        for (const modelPath of MODEL_PATHS) {
+            try {
+                console.log(`מנסה לטעון מודל מ: ${modelPath}`);
+                
+                // טעינת המודל
+                session = await loadModel(modelPath);
+                
+                if (session) {
+                    successfulLoad = true;
+                    updateModelStatus('success', `מודל נטען בהצלחה: ${modelPath.split('/').pop()}`);
+                    break; // יציאה מהלולאה אם הטעינה הצליחה
+                }
+            } catch (err) {
+                console.error(`שגיאה בטעינה מ ${modelPath}:`, err);
+                lastError = err;
+            }
+        }
+        
+        if (!successfulLoad) {
+            throw lastError || new Error('לא ניתן לטעון מודל מכל הנתיבים');
+        }
+        
     } catch (error) {
-        console.warn(`שגיאה בטעינת המודל מנתיב ${currentPath}:`, error);
-        console.log(`מנסה נתיב הבא (${index + 1} מתוך ${modelPaths.length})`);
-        // ניסיון הנתיב הבא
-        tryLoadModelFromPaths(index + 1);
+        console.error('שגיאה בטעינת מודל מובנה:', error);
+        updateModelStatus('error', 'שגיאה בטעינת מודל');
+    } finally {
+        hideLoading();
     }
 }
 
@@ -241,7 +252,7 @@ async function loadModel(modelPath) {
         updateModelStatus('loaded', 'המודל נטען בהצלחה!');
         console.log('המודל נטען בהצלחה');
         
-        return true; // חשוב להחזיר הצלחה עבור פונקציית tryLoadModelFromPaths
+        return true; // חשוב להחזיר הצלחה עבור פונקציית loadBuiltInModel
         
     } catch (error) {
         console.error('שגיאה בטעינת המודל:', error);
@@ -252,7 +263,7 @@ async function loadModel(modelPath) {
         isModelLoaded = false;
         session = null;
         
-        // מעבירים את השגיאה כדי שפונקציית tryLoadModelFromPaths תנסה את הנתיב הבא
+        // מעבירים את השגיאה כדי שפונקציית loadBuiltInModel תנסה את הנתיב הבא
         throw error;
     }
 }
@@ -493,45 +504,60 @@ async function processImage(img) {
 function decodeYoloV8Output(outputMap, imgDimensions) {
     const boxes = [];
     const outputKeys = Object.keys(outputMap);
-    const boxData = outputMap[outputKeys[0]].data;
-    const [batchSize, numDetections, outputDims] = outputMap[outputKeys[0]].dims;
+    
+    if (!outputKeys.length) {
+        console.error("אין מפתחות בפלט המודל:", outputMap);
+        return boxes;
+    }
+    
+    // בדיקה אם המודל הוא מסוג yolo11n או מודל שונה
+    const isYolo11Model = outputKeys.length === 1;
+    
+    if (isYolo11Model) {
+        // פענוח פלט מודל YOLOv11
+        return decodeYolo11Output(outputMap, imgDimensions);
+    } else {
+        // פענוח פלט המודל הקיים YOLOv8
+        const boxData = outputMap[outputKeys[0]].data;
+        const [batchSize, numDetections, outputDims] = outputMap[outputKeys[0]].dims;
 
-    for (let i = 0; i < numDetections; i++) {
-        const offset = i * 85;
-        const confidence = boxData[offset + 4];
-        if (confidence > CONFIDENCE_THRESHOLD) {
-            let maxClassScore = 0, maxClassIndex = 0;
-            for (let c = 0; c < 80; c++) {
-                const score = boxData[offset + 5 + c];
-                if (score > maxClassScore) {
-                    maxClassScore = score;
-                    maxClassIndex = c;
+        for (let i = 0; i < numDetections; i++) {
+            const offset = i * 85;
+            const confidence = boxData[offset + 4];
+            if (confidence > CONFIDENCE_THRESHOLD) {
+                let maxClassScore = 0, maxClassIndex = 0;
+                for (let c = 0; c < 80; c++) {
+                    const score = boxData[offset + 5 + c];
+                    if (score > maxClassScore) {
+                        maxClassScore = score;
+                        maxClassIndex = c;
+                    }
                 }
-            }
-            const finalScore = confidence * maxClassScore;
-            if (finalScore > CONFIDENCE_THRESHOLD) {
-                const cx = boxData[offset];
-                const cy = boxData[offset + 1];
-                const width = boxData[offset + 2];
-                const height = boxData[offset + 3];
-                
-                // סינון אובייקטים קטנים מדי (פחות מ-1% משטח התמונה)
-                const boxArea = width * height;
-                const MIN_AREA_RATIO = 0.01;
-                
-                if (boxArea > MIN_AREA_RATIO) {
-                    boxes.push({
-                        xmin: (cx - width / 2) * imgDimensions[0],
-                        ymin: (cy - height / 2) * imgDimensions[1],
-                        xmax: (cx + width / 2) * imgDimensions[0],
-                        ymax: (cy + height / 2) * imgDimensions[1],
-                        class: maxClassIndex,
-                        className: COCO_CLASSES[maxClassIndex],
-                        classNameHebrew: COCO_CLASSES_HEBREW[maxClassIndex],
-                        score: finalScore,
-                        // בדיקה אם המחלקה היא מהמועדפות
-                        isPreferred: PREFERRED_CLASS_INDICES.includes(maxClassIndex)
-                    });
+                const finalScore = confidence * maxClassScore;
+                if (finalScore > CONFIDENCE_THRESHOLD) {
+                    const cx = boxData[offset];
+                    const cy = boxData[offset + 1];
+                    const width = boxData[offset + 2];
+                    const height = boxData[offset + 3];
+                    
+                    // סינון אובייקטים קטנים מדי (פחות מ-1% משטח התמונה)
+                    const boxArea = width * height;
+                    const MIN_AREA_RATIO = 0.01;
+                    
+                    if (boxArea > MIN_AREA_RATIO) {
+                        boxes.push({
+                            xmin: (cx - width / 2) * imgDimensions[0],
+                            ymin: (cy - height / 2) * imgDimensions[1],
+                            xmax: (cx + width / 2) * imgDimensions[0],
+                            ymax: (cy + height / 2) * imgDimensions[1],
+                            class: maxClassIndex,
+                            className: COCO_CLASSES[maxClassIndex],
+                            classNameHebrew: COCO_CLASSES_HEBREW[maxClassIndex],
+                            score: finalScore,
+                            // בדיקה אם המחלקה היא מהמועדפות
+                            isPreferred: PREFERRED_CLASS_INDICES.includes(maxClassIndex)
+                        });
+                    }
                 }
             }
         }
@@ -547,6 +573,96 @@ function decodeYoloV8Output(outputMap, imgDimensions) {
     });
     
     // מגביל את מספר האובייקטים המוצגים
+    const MAX_OBJECTS = 10;
+    return boxes.slice(0, MAX_OBJECTS);
+}
+
+// פענוח פלט של מודל YOLOv11
+function decodeYolo11Output(outputMap, imgDimensions) {
+    const boxes = [];
+    const outputKey = Object.keys(outputMap)[0];
+    const output = outputMap[outputKey];
+    const [batchSize, numBoxes, numValues] = output.dims;
+    const data = output.data;
+    
+    console.log(`מפענח פלט YOLOv11: מידות=${output.dims}, סוג=${output.type}`);
+    
+    // במודל YOLOv11 הפלט מכיל: [קופסא, ביטחון, מחלקות]
+    // בד"כ מבנה הנתונים הוא [1, 8400, 85] כאשר:
+    // - 4 ערכים ראשונים הם קואורדינטות הקופסא (cx, cy, w, h)
+    // - הערך הבא הוא ביטחון האובייקט
+    // - 80 הערכים הבאים הם ציוני הביטחון עבור כל מחלקה
+
+    // עובר על כל הקופסאות
+    for (let i = 0; i < numBoxes; i++) {
+        const baseOffset = i * numValues;
+        
+        // חילוץ הביטחון הכללי (אובייקט)
+        const confidence = data[baseOffset + 4];
+        
+        if (confidence > CONFIDENCE_THRESHOLD) {
+            // מציאת המחלקה עם הביטחון הגבוה ביותר
+            let maxClassScore = 0, maxClassIndex = 0;
+            
+            for (let c = 0; c < 80; c++) {
+                const score = data[baseOffset + 5 + c];
+                if (score > maxClassScore) {
+                    maxClassScore = score;
+                    maxClassIndex = c;
+                }
+            }
+            
+            // חישוב הביטחון הסופי
+            const finalScore = confidence * maxClassScore;
+            
+            if (finalScore > CONFIDENCE_THRESHOLD) {
+                // חילוץ נתוני הקופסא
+                const cx = data[baseOffset + 0];
+                const cy = data[baseOffset + 1];
+                const width = data[baseOffset + 2];
+                const height = data[baseOffset + 3];
+                
+                // סינון אובייקטים קטנים מדי
+                const boxArea = width * height;
+                const MIN_AREA_RATIO = 0.005; // אחוז קטן יותר עבור מודל חדש ורגיש יותר
+                
+                if (boxArea > MIN_AREA_RATIO) {
+                    // העדפה מיוחדת למחלקות של פירות וירקות בYOLOv11
+                    // מזהי מחלקות: בננה=46, תפוח=47, תפוז=49, ברוקולי=50, גזר=51
+                    const isFruitOrVegetable = [46, 47, 49, 50, 51].includes(maxClassIndex);
+                    // העלאת הביטחון למחלקות מועדפות
+                    const adjustedScore = isFruitOrVegetable ? finalScore * 1.2 : finalScore;
+                    
+                    boxes.push({
+                        xmin: (cx - width / 2) * imgDimensions[0],
+                        ymin: (cy - height / 2) * imgDimensions[1],
+                        xmax: (cx + width / 2) * imgDimensions[0],
+                        ymax: (cy + height / 2) * imgDimensions[1],
+                        class: maxClassIndex,
+                        className: COCO_CLASSES[maxClassIndex],
+                        classNameHebrew: COCO_CLASSES_HEBREW[maxClassIndex],
+                        score: adjustedScore,
+                        isPreferred: PREFERRED_CLASS_INDICES.includes(maxClassIndex) || isFruitOrVegetable
+                    });
+                }
+            }
+        }
+    }
+    
+    // מיון עם העדפה למחלקות פירות וירקות
+    boxes.sort((a, b) => {
+        // תמיד מציג פירות וירקות קודם
+        const aIsFruitVeg = [46, 47, 49, 50, 51].includes(a.class);
+        const bIsFruitVeg = [46, 47, 49, 50, 51].includes(b.class);
+        
+        if (aIsFruitVeg && !bIsFruitVeg) return -1;
+        if (!aIsFruitVeg && bIsFruitVeg) return 1;
+        
+        // אחרת ממיין לפי ביטחון
+        return b.score - a.score;
+    });
+    
+    // מגביל למספר המרבי של אובייקטים
     const MAX_OBJECTS = 10;
     return boxes.slice(0, MAX_OBJECTS);
 }
