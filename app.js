@@ -1,4 +1,4 @@
-// מערכת זיהוי אובייקטים עם YOLOv8
+// מערכת זיהוי אובייקטים עם YOLO11
 
 // התייחסות לאלמנטים בדף
 let dropZone;
@@ -17,10 +17,12 @@ let lastResults = []; // שמירת התוצאות האחרונות
 
 // נתיבים אפשריים למודל - ננסה לפי הסדר
 const modelPaths = [
-    './yolov8n-seg.onnx', // נתיב יחסי מקומי
-    '/yolov8n-seg.onnx', // נתיב שורש
-    'https://github.com/Theicd/YOLOWEBTEST/raw/main/yolov8n-seg.onnx', // נתיב גיטהאב ישיר
-    'https://raw.githubusercontent.com/Theicd/YOLOWEBTEST/main/yolov8n-seg.onnx' // נתיב raw.githubusercontent.com
+    './yolo11n.onnx', // נתיב יחסי מקומי
+    '/yolo11n.onnx', // נתיב שורש
+    'https://github.com/Theicd/YOLOWEBTEST/raw/main/yolo11n.onnx', // נתיב גיטהאב ישיר
+    'https://raw.githubusercontent.com/Theicd/YOLOWEBTEST/main/yolo11n.onnx', // נתיב raw.githubusercontent.com
+    './yolov8n-seg.onnx', // גיבוי - נתיב יחסי מקומי לגרסה קודמת
+    'https://github.com/Theicd/YOLOWEBTEST/raw/main/yolov8n-seg.onnx' // גיבוי - נתיב גיטהאב לגרסה קודמת
 ];
 
 // קבועים למודל
@@ -61,12 +63,9 @@ const COCO_CLASSES_HEBREW = [
 const PREFERRED_CLASSES = [
     'banana', 'apple', 'orange', 'broccoli', 'carrot', // פירות וירקות
     'person', 'dog', 'cat', // בעלי חיים ואנשים
-    'chair', 'couch', 'table', // רהיטים
+    'chair', 'couch', 'dining table', // רהיטים
     'car', 'truck', 'bicycle' // כלי רכב
 ];
-
-// מיפוי אינדקסים של המחלקות המועדפות
-const PREFERRED_CLASS_INDICES = PREFERRED_CLASSES.map(className => COCO_CLASSES.indexOf(className));
 
 // אתחול האפליקציה
 document.addEventListener('DOMContentLoaded', function() {
@@ -285,7 +284,7 @@ function updateModelStatus(status, message) {
     switch (status) {
         case 'loading':
             statusLoader.style.display = 'block';
-            statusText.textContent = message || 'טוען את מודל YOLOv8...';
+            statusText.textContent = message || 'טוען את מודל YOLO...';
             modelStatusElement.className = 'model-status loading';
             break;
         case 'loaded':
@@ -489,26 +488,53 @@ async function processImage(img) {
     }
 }
 
-// פענוח פלט של YOLOv8
+// פענוח פלט של YOLO11
 function decodeYoloV8Output(outputMap, imgDimensions) {
     const boxes = [];
     const outputKeys = Object.keys(outputMap);
     const boxData = outputMap[outputKeys[0]].data;
     const [batchSize, numDetections, outputDims] = outputMap[outputKeys[0]].dims;
 
+    // בדיקה אם יש הבדל במבנה הפלט בין YOLOv8 ל-YOLO11
+    const isYOLO11 = outputDims === 84; // YOLO11 יש לו 84 ערכים לכל זיהוי (4 קואורדינטות + 80 מחלקות)
+    const confidenceIndex = isYOLO11 ? 4 : 4; // אותו אינדקס לביטחון בשני המודלים
+    const classStartIndex = isYOLO11 ? 4 : 5; // תחילת אינדקס המחלקות
+    const numClasses = isYOLO11 ? 80 : 80; // מספר המחלקות
+
+    console.log(`מפענח פלט YOLO מסוג: ${isYOLO11 ? 'YOLO11' : 'YOLOv8'}, מימדים: ${outputDims}`);
+
     for (let i = 0; i < numDetections; i++) {
-        const offset = i * 85;
-        const confidence = boxData[offset + 4];
+        const offset = i * outputDims;
+        // בYOLO11 אנחנו בודקים את הביטחון הכללי בצורה שונה
+        let confidence = 0;
+        
+        if (isYOLO11) {
+            // בYOLO11 הביטחון מחושב ישירות מהציונים של המחלקות
+            let maxClassScore = 0;
+            for (let c = 0; c < numClasses; c++) {
+                const score = boxData[offset + classStartIndex + c];
+                maxClassScore = Math.max(maxClassScore, score);
+            }
+            confidence = maxClassScore; // הביטחון הגבוה ביותר מבין המחלקות
+        } else {
+            // בYOLOv8 הביטחון נמצא באינדקס ספציפי
+            confidence = boxData[offset + confidenceIndex];
+        }
+
         if (confidence > CONFIDENCE_THRESHOLD) {
             let maxClassScore = 0, maxClassIndex = 0;
-            for (let c = 0; c < 80; c++) {
-                const score = boxData[offset + 5 + c];
+            
+            // מציאת המחלקה עם הציון הגבוה ביותר
+            for (let c = 0; c < numClasses; c++) {
+                const score = boxData[offset + classStartIndex + c];
                 if (score > maxClassScore) {
                     maxClassScore = score;
                     maxClassIndex = c;
                 }
             }
-            const finalScore = confidence * maxClassScore;
+            
+            const finalScore = isYOLO11 ? maxClassScore : confidence * maxClassScore;
+            
             if (finalScore > CONFIDENCE_THRESHOLD) {
                 const cx = boxData[offset];
                 const cy = boxData[offset + 1];
@@ -529,8 +555,7 @@ function decodeYoloV8Output(outputMap, imgDimensions) {
                         className: COCO_CLASSES[maxClassIndex],
                         classNameHebrew: COCO_CLASSES_HEBREW[maxClassIndex],
                         score: finalScore,
-                        // בדיקה אם המחלקה היא מהמועדפות
-                        isPreferred: PREFERRED_CLASS_INDICES.includes(maxClassIndex)
+                        isPreferred: PREFERRED_CLASSES.includes(COCO_CLASSES[maxClassIndex])
                     });
                 }
             }
@@ -557,8 +582,8 @@ async function preprocessImageForYOLO(img) {
         console.log("מתחיל עיבוד מקדים של התמונה למודל YOLO");
         
         // בהרבה מודלים של YOLO, הקלט הוא 640x640
-        const inputWidth = 640;
-        const inputHeight = 640;
+        const inputWidth = IMAGE_SIZE;
+        const inputHeight = IMAGE_SIZE;
         
         console.log(`מימדי קלט למודל: ${inputWidth}x${inputHeight}`);
         
@@ -582,17 +607,13 @@ async function preprocessImageForYOLO(img) {
         const blueChannel = new Float32Array(inputWidth * inputHeight);
         
         // המרת נתוני התמונה לפורמט המתאים למודל YOLO
-        // YOLOv8 מצפה לתמונה בפורמט [batch, channels, height, width] עם נירמול לטווח [0,1]
+        // YOLO11 וגם YOLOv8 מצפים לתמונה בפורמט [batch, channels, height, width] עם נירמול לטווח [0,1]
         for (let i = 0; i < data.length / 4; i++) {
             // נרמול הערכים לטווח [0,1]
             redChannel[i] = data[i * 4] / 255.0;
             greenChannel[i] = data[i * 4 + 1] / 255.0;
             blueChannel[i] = data[i * 4 + 2] / 255.0;
         }
-        
-        // יצירת מערך מאוחד עבור כל הערוצים
-        // נרמול לפי המודל: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-        // במידה ואין צורך, הורד את הנרמול המותאם
         
         // יצירת מערך מאוחד לפי סדר CHW (channels, height, width)
         const rgbData = new Float32Array(3 * inputHeight * inputWidth);
