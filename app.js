@@ -15,17 +15,17 @@ let session = null;
 let isModelLoaded = false;
 let lastResults = []; // שמירת התוצאות האחרונות
 
-// רשימת נתיבים אפשריים למודל
-const MODEL_PATHS = [
-    'models/yolov8n.onnx', // נתיב מקומי
-    'yolov8n.onnx', // נתיב מקומי אלטרנטיבי
-    'https://raw.githubusercontent.com/Theicd/YOLOWEBTEST/main/yolo11n.onnx', // מודל מתקדם מ-GitHub
-    'https://raw.githubusercontent.com/ultralytics/assets/main/yolov8n.onnx' // מודל מקורי מ-GitHub
+// נתיבים אפשריים למודל - ננסה לפי הסדר
+const modelPaths = [
+    './yolov8n-seg.onnx', // נתיב יחסי מקומי
+    '/yolov8n-seg.onnx', // נתיב שורש
+    'https://github.com/Theicd/YOLOWEBTEST/raw/main/yolov8n-seg.onnx', // נתיב גיטהאב ישיר
+    'https://raw.githubusercontent.com/Theicd/YOLOWEBTEST/main/yolov8n-seg.onnx' // נתיב raw.githubusercontent.com
 ];
 
 // קבועים למודל
 const IMAGE_SIZE = 640;
-const CONFIDENCE_THRESHOLD = 0.6; // העלאת סף הביטחון - היה 0.25 קודם
+const CONFIDENCE_THRESHOLD = 0.5; // העלאת סף הביטחון - היה 0.25 קודם
 const NUM_CLASSES = 80;
 const ANCHORS = [];
 
@@ -67,9 +67,6 @@ const PREFERRED_CLASSES = [
 
 // מיפוי אינדקסים של המחלקות המועדפות
 const PREFERRED_CLASS_INDICES = PREFERRED_CLASSES.map(className => COCO_CLASSES.indexOf(className));
-
-// רשימת אינדקסים של פירות וירקות במודל COCO (מתאים גם למודל YOLOv11)
-const FRUIT_VEG_CLASS_INDICES = [46, 47, 49, 50, 51]; // בננה, תפוח, תפוז, ברוקולי, גזר
 
 // אתחול האפליקציה
 document.addEventListener('DOMContentLoaded', function() {
@@ -156,43 +153,35 @@ function setupEventListeners() {
     });
 }
 
-// טעינת מודל מובנה
-async function loadBuiltInModel() {
+// טעינת המודל המובנה
+function loadBuiltInModel() {
+    // עדכון סטטוס הטעינה
+    updateModelStatus('loading', 'טוען מודל... (זה עשוי לקחת מספר שניות)');
+    
+    // טעינת המודל - ננסה לפי הסדר
+    tryLoadModelFromPaths(0);
+}
+
+// ניסיון טעינת מודל מכל הנתיבים האפשריים
+async function tryLoadModelFromPaths(index) {
+    if (index >= modelPaths.length) {
+        // נכשלנו לטעון מכל הנתיבים
+        updateModelStatus('error', 'נכשל בטעינת המודל מכל המקורות האפשריים');
+        console.error('נכשל לטעון את המודל מכל הנתיבים האפשריים');
+        return;
+    }
+    
+    const currentPath = modelPaths[index];
+    console.log(`מנסה לטעון מודל מנתיב (${index + 1}/${modelPaths.length}): ${currentPath}`);
+    
     try {
-        showLoading('טוען מודל מובנה...');
-        updateModelStatus('loading', 'טוען מודל...');
-        
-        let successfulLoad = false;
-        let lastError = null;
-        
-        // ניסיון לטעון את המודל מכל הנתיבים האפשריים עד שאחד מצליח
-        for (const modelPath of MODEL_PATHS) {
-            try {
-                console.log(`מנסה לטעון מודל מ: ${modelPath}`);
-                
-                // טעינת המודל
-                session = await loadModel(modelPath);
-                
-                if (session) {
-                    successfulLoad = true;
-                    updateModelStatus('success', `מודל נטען בהצלחה: ${modelPath.split('/').pop()}`);
-                    break; // יציאה מהלולאה אם הטעינה הצליחה
-                }
-            } catch (err) {
-                console.error(`שגיאה בטעינה מ ${modelPath}:`, err);
-                lastError = err;
-            }
-        }
-        
-        if (!successfulLoad) {
-            throw lastError || new Error('לא ניתן לטעון מודל מכל הנתיבים');
-        }
-        
+        await loadModel(currentPath);
+        // אם הגענו לכאן, המודל נטען בהצלחה
     } catch (error) {
-        console.error('שגיאה בטעינת מודל מובנה:', error);
-        updateModelStatus('error', 'שגיאה בטעינת מודל');
-    } finally {
-        hideLoading();
+        console.warn(`שגיאה בטעינת המודל מנתיב ${currentPath}:`, error);
+        console.log(`מנסה נתיב הבא (${index + 1} מתוך ${modelPaths.length})`);
+        // ניסיון הנתיב הבא
+        tryLoadModelFromPaths(index + 1);
     }
 }
 
@@ -252,7 +241,7 @@ async function loadModel(modelPath) {
         updateModelStatus('loaded', 'המודל נטען בהצלחה!');
         console.log('המודל נטען בהצלחה');
         
-        return true; // חשוב להחזיר הצלחה עבור פונקציית loadBuiltInModel
+        return true; // חשוב להחזיר הצלחה עבור פונקציית tryLoadModelFromPaths
         
     } catch (error) {
         console.error('שגיאה בטעינת המודל:', error);
@@ -263,7 +252,7 @@ async function loadModel(modelPath) {
         isModelLoaded = false;
         session = null;
         
-        // מעבירים את השגיאה כדי שפונקציית loadBuiltInModel תנסה את הנתיב הבא
+        // מעבירים את השגיאה כדי שפונקציית tryLoadModelFromPaths תנסה את הנתיב הבא
         throw error;
     }
 }
@@ -325,8 +314,37 @@ function updateModelStatus(status, message) {
 
 // הצגת הודעת שגיאה
 function showError(message) {
-    console.error("שגיאת מערכת:", message);
-    alert(`שגיאה: ${message}`);
+    // בדיקה שזאת תמונה
+    if (!file.type.startsWith('image/')) {
+        throw new Error('אנא העלה קובץ תמונה בלבד');
+    }
+    
+    // בדיקה שהמודל נטען
+    if (!isModelLoaded) {
+        throw new Error('אנא טען מודל לפני העלאת תמונה');
+    }
+        
+    // בדיקה אם יש כבר אלמנט שגיאה
+    let errorElement = document.getElementById('error-message');
+    
+    // אם אין אלמנט שגיאה, יצירת אחד חדש
+    if (!errorElement) {
+        errorElement = document.createElement('div');
+        errorElement.id = 'error-message';
+        errorElement.className = 'error-message';
+        document.body.appendChild(errorElement);
+    }
+    
+    // הגדרת הודעת השגיאה
+    errorElement.textContent = message;
+    errorElement.style.display = 'block';
+    
+    // הסתרת ההודעה אחרי 5 שניות
+    setTimeout(() => {
+        errorElement.style.display = 'none';
+    }, 5000);
+    
+    console.error(message);
 }
 
 // הצגת אינדיקטור טעינה
@@ -415,18 +433,19 @@ async function handleImageUpload(file) {
 
 // עיבוד תמונה
 async function processImage(img) {
-    console.log("מתחיל עיבוד תמונה...");
-    
     try {
-        showLoading('מעבד תמונה...');
-        
         // בדיקה שהמודל טעון
         if (!session || !isModelLoaded) {
             throw new Error('המודל לא נטען, אנא טען מודל לפני עיבוד תמונה');
         }
         
-        // הכנת התמונה
-        const preprocessedData = await preprocessImageForYolo(img);
+        console.log("מתחיל עיבוד תמונה...");
+        
+        // הצגת אינדיקטור טעינה
+        showLoading("מעבד תמונה...");
+        
+        // הכנת התמונה לעיבוד
+        const preprocessedData = await preprocessImageForYOLO(img);
         
         if (!preprocessedData || !preprocessedData.tensor) {
             throw new Error('שגיאה בהכנת התמונה לעיבוד');
@@ -444,88 +463,29 @@ async function processImage(img) {
         const outputMap = await session.run(feeds);
         console.log("המודל הסתיים, פלט:", outputMap);
         
-        // בדיקה שיש פלט
-        if (!outputMap || Object.keys(outputMap).length === 0) {
-            throw new Error('המודל לא החזיר פלט');
-        }
-        
-        // זיהוי סוג המודל לפי הפלט
-        const isYolo11 = Object.keys(outputMap).length === 1 && 
-                         outputMap[Object.keys(outputMap)[0]].dims.length === 3;
-        
-        console.log(`זיהוי סוג מודל: ${isYolo11 ? 'YOLOv11' : 'YOLOv8'}`);
-        
-        // פענוח תוצאות המודל בהתאם לסוג
-        let boxes;
-        if (isYolo11) {
-            boxes = decodeYolo11Output(outputMap, [img.width, img.height]);
-        } else {
-            boxes = decodeYoloV8Output(outputMap, [img.width, img.height]);
-        }
+        // פענוח תוצאות המודל
+        const boxes = decodeYoloV8Output(outputMap, preprocessedData.dimensions);
         
         // הצגת התוצאות
         if (boxes && boxes.length > 0) {
-            displayResults(boxes, [img.width, img.height]);
+            // שליחת התוצאות לתצוגה
+            displayResults(boxes, preprocessedData.originalSize);
             
             // שמירת התוצאות לייצוא
             lastResults = boxes;
             
             console.log(`זוהו ${boxes.length} אובייקטים`);
         } else {
-            resultsList.innerHTML = '<li class="no-results">לא זוהו אובייקטים</li>';
-            console.log("לא זוהו אובייקטים בתמונה");
+            console.log('לא זוהו אובייקטים בתמונה');
+            resultsList.innerHTML = '<li class="no-results">לא זוהו אובייקטים בתמונה</li>';
         }
         
+        // הסתרת אינדיקטור טעינה
+        hideLoading();
     } catch (error) {
         console.error("שגיאה בעיבוד התמונה:", error);
         showError(`שגיאה בעיבוד התמונה: ${error.message}`);
-    } finally {
         hideLoading();
-    }
-}
-
-// הכנת התמונה לעיבוד למודל YOLO
-async function preprocessImageForYolo(img) {
-    console.log("מתחיל עיבוד מקדים של התמונה למודל YOLO");
-    
-    try {
-        // יצירת קנבס בגודל הקלט של המודל
-        const canvas = document.createElement('canvas');
-        canvas.width = IMAGE_SIZE;
-        canvas.height = IMAGE_SIZE;
-        
-        console.log("מימדי קלט למודל:", canvas.width + "x" + canvas.height);
-        
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
-        
-        // קבלת נתוני התמונה
-        const imageData = ctx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
-        const data = imageData.data;
-        
-        // יצירת מערך תלת-ממדי עבור המודל (תעלות RGB)
-        const rgbData = new Float32Array(3 * IMAGE_SIZE * IMAGE_SIZE);
-        
-        // מילוי הנתונים במבנה שהמודל מצפה לו [R,R,R,...,G,G,G,...,B,B,B,...]
-        for (let i = 0; i < data.length / 4; i++) {
-            // נתוני RGB מהתמונה, מנורמלים לטווח 0-1
-            rgbData[i] = data[i * 4] / 255.0;  // ערוץ R
-            rgbData[i + IMAGE_SIZE * IMAGE_SIZE] = data[i * 4 + 1] / 255.0;  // ערוץ G
-            rgbData[i + 2 * IMAGE_SIZE * IMAGE_SIZE] = data[i * 4 + 2] / 255.0;  // ערוץ B
-        }
-        
-        console.log("עיבוד מקדים של התמונה הושלם");
-        
-        // החזרת טנסור המידע ונתונים נוספים
-        return {
-            tensor: new ort.Tensor('float32', rgbData, [1, 3, IMAGE_SIZE, IMAGE_SIZE]),
-            dimensions: [1, 3, IMAGE_SIZE, IMAGE_SIZE],
-            originalSize: [img.width, img.height]
-        };
-        
-    } catch (error) {
-        console.error("שגיאה בעיבוד מקדים של התמונה:", error);
-        throw error;
     }
 }
 
@@ -533,60 +493,45 @@ async function preprocessImageForYolo(img) {
 function decodeYoloV8Output(outputMap, imgDimensions) {
     const boxes = [];
     const outputKeys = Object.keys(outputMap);
-    
-    if (!outputKeys.length) {
-        console.error("אין מפתחות בפלט המודל:", outputMap);
-        return boxes;
-    }
-    
-    // בדיקה אם המודל הוא מסוג yolo11n או מודל שונה
-    const isYolo11Model = outputKeys.length === 1;
-    
-    if (isYolo11Model) {
-        // פענוח פלט מודל YOLOv11
-        return decodeYolo11Output(outputMap, imgDimensions);
-    } else {
-        // פענוח פלט המודל הקיים YOLOv8
-        const boxData = outputMap[outputKeys[0]].data;
-        const [batchSize, numDetections, outputDims] = outputMap[outputKeys[0]].dims;
+    const boxData = outputMap[outputKeys[0]].data;
+    const [batchSize, numDetections, outputDims] = outputMap[outputKeys[0]].dims;
 
-        for (let i = 0; i < numDetections; i++) {
-            const offset = i * 85;
-            const confidence = boxData[offset + 4];
-            if (confidence > CONFIDENCE_THRESHOLD) {
-                let maxClassScore = 0, maxClassIndex = 0;
-                for (let c = 0; c < 80; c++) {
-                    const score = boxData[offset + 5 + c];
-                    if (score > maxClassScore) {
-                        maxClassScore = score;
-                        maxClassIndex = c;
-                    }
+    for (let i = 0; i < numDetections; i++) {
+        const offset = i * 85;
+        const confidence = boxData[offset + 4];
+        if (confidence > CONFIDENCE_THRESHOLD) {
+            let maxClassScore = 0, maxClassIndex = 0;
+            for (let c = 0; c < 80; c++) {
+                const score = boxData[offset + 5 + c];
+                if (score > maxClassScore) {
+                    maxClassScore = score;
+                    maxClassIndex = c;
                 }
-                const finalScore = confidence * maxClassScore;
-                if (finalScore > CONFIDENCE_THRESHOLD) {
-                    const cx = boxData[offset];
-                    const cy = boxData[offset + 1];
-                    const width = boxData[offset + 2];
-                    const height = boxData[offset + 3];
-                    
-                    // סינון אובייקטים קטנים מדי (פחות מ-1% משטח התמונה)
-                    const boxArea = width * height;
-                    const MIN_AREA_RATIO = 0.01;
-                    
-                    if (boxArea > MIN_AREA_RATIO) {
-                        boxes.push({
-                            xmin: (cx - width / 2) * imgDimensions[0],
-                            ymin: (cy - height / 2) * imgDimensions[1],
-                            xmax: (cx + width / 2) * imgDimensions[0],
-                            ymax: (cy + height / 2) * imgDimensions[1],
-                            class: maxClassIndex,
-                            className: COCO_CLASSES[maxClassIndex],
-                            classNameHebrew: COCO_CLASSES_HEBREW[maxClassIndex],
-                            score: finalScore,
-                            // בדיקה אם המחלקה היא מהמועדפות
-                            isPreferred: PREFERRED_CLASS_INDICES.includes(maxClassIndex)
-                        });
-                    }
+            }
+            const finalScore = confidence * maxClassScore;
+            if (finalScore > CONFIDENCE_THRESHOLD) {
+                const cx = boxData[offset];
+                const cy = boxData[offset + 1];
+                const width = boxData[offset + 2];
+                const height = boxData[offset + 3];
+                
+                // סינון אובייקטים קטנים מדי (פחות מ-1% משטח התמונה)
+                const boxArea = width * height;
+                const MIN_AREA_RATIO = 0.01;
+                
+                if (boxArea > MIN_AREA_RATIO) {
+                    boxes.push({
+                        xmin: (cx - width / 2) * imgDimensions[0],
+                        ymin: (cy - height / 2) * imgDimensions[1],
+                        xmax: (cx + width / 2) * imgDimensions[0],
+                        ymax: (cy + height / 2) * imgDimensions[1],
+                        class: maxClassIndex,
+                        className: COCO_CLASSES[maxClassIndex],
+                        classNameHebrew: COCO_CLASSES_HEBREW[maxClassIndex],
+                        score: finalScore,
+                        // בדיקה אם המחלקה היא מהמועדפות
+                        isPreferred: PREFERRED_CLASS_INDICES.includes(maxClassIndex)
+                    });
                 }
             }
         }
@@ -606,101 +551,72 @@ function decodeYoloV8Output(outputMap, imgDimensions) {
     return boxes.slice(0, MAX_OBJECTS);
 }
 
-// פענוח פלט של מודל YOLOv11
-function decodeYolo11Output(outputMap, originalSize) {
-    const boxes = [];
-    const outputKey = Object.keys(outputMap)[0];
-    
-    if (!outputMap[outputKey]) {
-        console.error("אין נתונים בפלט המודל לפענוח");
-        return boxes;
-    }
-    
-    const output = outputMap[outputKey];
-    const [batchSize, numBoxes, numValues] = output.dims;
-    const data = output.data;
-    
-    console.log(`מפענח פלט YOLOv11: מימדים=${output.dims.join('x')}, מס' קופסאות=${numBoxes}`);
-    
-    // אינדקסים של פירות וירקות במודל COCO
-    const fruitVegetableClasses = [46, 47, 49, 50, 51]; // בננה, תפוח, תפוז, ברוקולי, גזר
-    
-    // עובר על כל הקופסאות שהמודל זיהה
-    for (let i = 0; i < numBoxes; i++) {
-        const baseOffset = i * numValues;
+// עיבוד התמונה למודל YOLO
+async function preprocessImageForYOLO(img) {
+    try {
+        console.log("מתחיל עיבוד מקדים של התמונה למודל YOLO");
         
-        // חילוץ הביטחון הכללי (objectness)
-        const confidence = data[baseOffset + 4];
+        // בהרבה מודלים של YOLO, הקלט הוא 640x640
+        const inputWidth = 640;
+        const inputHeight = 640;
         
-        if (confidence > CONFIDENCE_THRESHOLD * 0.8) { // סף נמוך יותר לבדיקה ראשונית
-            // מציאת המחלקה עם הביטחון הגבוה ביותר
-            let maxClassScore = 0, maxClassIndex = 0;
-            
-            for (let c = 0; c < 80; c++) {
-                const score = data[baseOffset + 5 + c];
-                if (score > maxClassScore) {
-                    maxClassScore = score;
-                    maxClassIndex = c;
-                }
-            }
-            
-            // חישוב הביטחון הסופי (objectness * class confidence)
-            let finalScore = confidence * maxClassScore;
-            
-            // מתן בונוס למחלקות פירות וירקות
-            const isFruitOrVegetable = fruitVegetableClasses.includes(maxClassIndex);
-            if (isFruitOrVegetable) {
-                finalScore *= 1.2; // העלאת הביטחון ב-20%
-            }
-            
-            if (finalScore > CONFIDENCE_THRESHOLD) {
-                // חילוץ נתוני הקופסא (במרחב הנורמליזציה 0-1)
-                const cx = data[baseOffset + 0]; // מרכז x
-                const cy = data[baseOffset + 1]; // מרכז y
-                const width = data[baseOffset + 2]; // רוחב
-                const height = data[baseOffset + 3]; // גובה
-                
-                // המרת הקואורדינטות למידות המקוריות של התמונה
-                const imgWidth = originalSize[0];
-                const imgHeight = originalSize[1];
-                
-                // חישוב קואורדינטות הקופסא במידות המקוריות
-                const xmin = (cx - width/2) * imgWidth;
-                const ymin = (cy - height/2) * imgHeight;
-                const xmax = (cx + width/2) * imgWidth;
-                const ymax = (cy + height/2) * imgHeight;
-                
-                // הוספת הקופסא לרשימה
-                boxes.push({
-                    xmin: xmin,
-                    ymin: ymin,
-                    xmax: xmax,
-                    ymax: ymax,
-                    class: maxClassIndex,
-                    className: COCO_CLASSES[maxClassIndex],
-                    classNameHebrew: COCO_CLASSES_HEBREW[maxClassIndex],
-                    score: finalScore,
-                    isPreferred: isFruitOrVegetable
-                });
-            }
+        console.log(`מימדי קלט למודל: ${inputWidth}x${inputHeight}`);
+        
+        // יצירת קנבס לשינוי גודל התמונה
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = inputWidth;
+        canvas.height = inputHeight;
+        
+        // ציור התמונה על הקנבס בגודל החדש
+        ctx.drawImage(img, 0, 0, inputWidth, inputHeight);
+        
+        // קבלת נתוני הפיקסלים
+        const imageData = ctx.getImageData(0, 0, inputWidth, inputHeight);
+        const data = imageData.data;
+        
+        // אתחול מערכים עבור הערוצים RGB
+        const redChannel = new Float32Array(inputWidth * inputHeight);
+        const greenChannel = new Float32Array(inputWidth * inputHeight);
+        const blueChannel = new Float32Array(inputWidth * inputHeight);
+        
+        // המרת נתוני התמונה לפורמט המתאים למודל YOLO
+        // YOLOv8 מצפה לתמונה בפורמט [batch, channels, height, width] עם נירמול לטווח [0,1]
+        for (let i = 0; i < data.length / 4; i++) {
+            // נרמול הערכים לטווח [0,1]
+            redChannel[i] = data[i * 4] / 255.0;
+            greenChannel[i] = data[i * 4 + 1] / 255.0;
+            blueChannel[i] = data[i * 4 + 2] / 255.0;
         }
-    }
-    
-    console.log(`YOLOv11 זיהה ${boxes.length} אובייקטים לפני מיון`);
-    
-    // מיון עם העדפה למחלקות פירות וירקות
-    boxes.sort((a, b) => {
-        // תמיד מציג פירות וירקות קודם
-        if (a.isPreferred && !b.isPreferred) return -1;
-        if (!a.isPreferred && b.isPreferred) return 1;
         
-        // אחרת ממיין לפי ביטחון
-        return b.score - a.score;
-    });
-    
-    // מגביל למספר המרבי של אובייקטים
-    const MAX_OBJECTS = 10;
-    return boxes.slice(0, MAX_OBJECTS);
+        // יצירת מערך מאוחד עבור כל הערוצים
+        // נרמול לפי המודל: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        // במידה ואין צורך, הורד את הנרמול המותאם
+        
+        // יצירת מערך מאוחד לפי סדר CHW (channels, height, width)
+        const rgbData = new Float32Array(3 * inputHeight * inputWidth);
+        
+        // העתקת הנתונים למערך המאוחד
+        rgbData.set(redChannel, 0);
+        rgbData.set(greenChannel, inputWidth * inputHeight);
+        rgbData.set(blueChannel, 2 * inputWidth * inputHeight);
+        
+        // יצירת טנסור עבור ה-ONNX runtime
+        const tensor = new ort.Tensor('float32', rgbData, [1, 3, inputHeight, inputWidth]);
+        
+        console.log("עיבוד מקדים של התמונה הושלם");
+        
+        // החזרת הטנסור ומימדי הקלט
+        return {
+            tensor: tensor,
+            dimensions: [1, 3, inputHeight, inputWidth],
+            originalSize: [img.width, img.height]
+        };
+    } catch (error) {
+        console.error("שגיאה בעיבוד מקדים של התמונה:", error);
+        throw new Error(`שגיאה בעיבוד מקדים של התמונה: ${error.message}`);
+    }
 }
 
 // הצגת תמונה בתצוגה המקדימה
